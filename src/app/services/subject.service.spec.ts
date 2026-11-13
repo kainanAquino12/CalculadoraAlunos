@@ -134,3 +134,66 @@ describe('SubjectService (persistência)', () => {
     expect(reload().findSubject('custom-x')).toBeUndefined();
   });
 });
+
+describe('SubjectService (períodos)', () => {
+  const custom = (id: string, semester: string) => ({
+    id,
+    name: `Matéria ${semester}`,
+    semester,
+    target: 7,
+    finalScale: 10,
+    model: 'direct' as const,
+    evaluations: [{ id: 'av1', name: 'P1', scale: 10, maxPoints: 10 }],
+    formula: { validation: 'confirmed' as const, text: '', source: '', explanation: '', notes: [] },
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.resetTestingModule();
+  });
+
+  it('abre no período atual e oferece o atual + 2 anteriores, do mais novo ao mais antigo', () => {
+    const svc = TestBed.inject(SubjectService);
+    expect(svc.selectedSemester()).toBe('2026/2');
+    expect(svc.semesters()).toEqual(['2026/2', '2026/1', '2025/2']);
+    expect(svc.visibleSubjects().length).toBe(5);
+  });
+
+  it('períodos anteriores a 2026/1 viram virada de ano corretamente', async () => {
+    const { previousSemesters } = await import('./subject.service');
+    expect(previousSemesters('2026/2', 3)).toEqual(['2026/1', '2025/2', '2025/1']);
+    expect(previousSemesters('lixo', 2)).toEqual([]);
+  });
+
+  it('trocar de período filtra as matérias e a escolha é lembrada', () => {
+    const svc = TestBed.inject(SubjectService);
+    svc.selectSemester('2026/1');
+    expect(svc.visibleSubjects()).toEqual([]);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(SubjectService).selectedSemester()).toBe('2026/1');
+  });
+
+  it('matéria personalizada aparece só no seu período e cria o período na lista', () => {
+    const svc = TestBed.inject(SubjectService);
+    svc.addSubject(custom('c1', '2024/2'));
+    expect(svc.semesters()).toEqual(['2026/2', '2026/1', '2025/2', '2024/2']);
+    svc.selectSemester('2024/2');
+    expect(svc.visibleSubjects().map((s) => s.id)).toEqual(['c1']);
+    svc.selectSemester('2026/2');
+    expect(svc.visibleSubjects().some((s) => s.id === 'c1')).toBe(false);
+  });
+
+  it('ignora valor salvo inválido e volta ao período atual', () => {
+    localStorage.setItem('notacerta:period', 'qualquer coisa');
+    expect(TestBed.inject(SubjectService).selectedSemester()).toBe('2026/2');
+  });
+
+  it('as notas de um período não se misturam com as de outro', () => {
+    const svc = TestBed.inject(SubjectService);
+    svc.addSubject(custom('c1', '2025/2'));
+    svc.setGrade('c1', 'av1', 9);
+    svc.setGrade(WEB, 'prova1', 1);
+    expect(svc.summaries()['c1'].accumulated).toBe(9);
+    expect(svc.summaries()[WEB].accumulated).toBeCloseTo(1);
+  });
+});

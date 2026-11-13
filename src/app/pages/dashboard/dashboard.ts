@@ -32,12 +32,24 @@ import { outcomeOf } from '../../utils/status';
       <p class="nc-note nc-note--warning" role="alert">Não foi possível salvar no navegador (armazenamento bloqueado). Suas notas serão perdidas ao fechar a página.</p>
     }
 
-    <h2 class="nc-section-title" id="disciplinas">Minhas disciplinas</h2>
+    <div class="nc-periods-head">
+      <h2 class="nc-section-title" id="disciplinas">Minhas disciplinas</h2>
+      <div class="nc-periods" role="group" aria-label="Período letivo">
+        @for (s of svc.semesters(); track s) {
+          <button type="button" class="nc-chip nc-period" [class.nc-chip--on]="s === svc.selectedSemester()" [attr.aria-pressed]="s === svc.selectedSemester()" (click)="svc.selectSemester(s)">
+            {{ s }}@if (s === svc.currentSemester) {<span class="nc-period__tag"> (Atual)</span>}
+          </button>
+        }
+      </div>
+    </div>
     <div class="nc-grid">
-      @for (subject of svc.subjects(); track subject.id) {
+      @for (subject of svc.visibleSubjects(); track subject.id) {
         <app-subject-card [subject]="subject" [summary]="svc.summaries()[subject.id]" />
       }
-      <a routerLink="/adicionar" class="nc-card nc-add-tile">
+      @if (svc.visibleSubjects().length === 0) {
+        <p class="nc-card nc-grid__full nc-period-empty">Nenhuma matéria em {{ svc.selectedSemester() }} ainda. Adicione a primeira para acompanhar as notas desse período.</p>
+      }
+      <a routerLink="/adicionar" [queryParams]="{ periodo: svc.selectedSemester() }" class="nc-card nc-add-tile">
         <span class="nc-add-tile__plus"><app-icon name="plus" /></span>
         <strong>Adicionar nova matéria</strong>
         <span class="nc-small">Crie sua própria disciplina e configure as avaliações.</span>
@@ -74,7 +86,7 @@ export class DashboardPage {
 
   protected readonly stats = computed(() => {
     const summaries = this.svc.summaries();
-    const subjects = this.svc.subjects();
+    const subjects = this.svc.visibleSubjects();
     const count = { total: subjects.length, reached: 0, inProgress: 0, outOfReach: 0 };
     for (const s of subjects) {
       const outcome = outcomeOf(summaries[s.id]);

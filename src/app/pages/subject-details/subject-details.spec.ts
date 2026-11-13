@@ -117,3 +117,30 @@ describe('DashboardPage', () => {
     expect(root.querySelector('.nc-stat__n')?.textContent).toBe('5');
   });
 });
+
+describe('Dashboard: seletor de período', () => {
+  async function render() {
+    localStorage.clear();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [provideRouter([])] });
+    const fixture = TestBed.createComponent(DashboardPage);
+    await fixture.whenStable();
+    return fixture;
+  }
+
+  it('mostra os períodos com o atual marcado e filtra as disciplinas ao trocar', async () => {
+    const fixture = await render();
+    const root = fixture.nativeElement as HTMLElement;
+    const chips = [...root.querySelectorAll<HTMLButtonElement>('.nc-period')];
+    expect(chips.map((c) => c.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['2026/2 (Atual)', '2026/1', '2025/2']);
+    expect(chips[0].getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelectorAll('app-subject-card').length).toBe(5);
+
+    chips[1].click();
+    await fixture.whenStable();
+    expect(root.querySelectorAll('app-subject-card').length).toBe(0);
+    expect(root.querySelector('.nc-period-empty')!.textContent).toContain('Nenhuma matéria em 2026/1');
+    expect(root.querySelector('.nc-stat__n')!.textContent).toBe('0'); // indicadores seguem o período
+    expect(root.querySelector('.nc-add-tile')).not.toBeNull();
+  });
+});

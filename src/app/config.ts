@@ -8,6 +8,9 @@ import { InjectionToken } from '@angular/core';
  */
 export const GOOGLE_CLIENT_ID_VALUE = '';
 
+/** Período letivo "atual" (o que abre selecionado e recebe o rótulo "Atual"). Troque a cada semestre. */
+export const CURRENT_SEMESTER = '2026/2';
+
 export const GOOGLE_CLIENT_ID = new InjectionToken<string>('GOOGLE_CLIENT_ID', {
   providedIn: 'root',
   factory: () => GOOGLE_CLIENT_ID_VALUE,

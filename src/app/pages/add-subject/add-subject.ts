@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, input, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { Evaluation } from '../../models/evaluation.model';
@@ -130,7 +130,10 @@ const MODEL_INFO: Record<CalcModel, { label: string; hint: string }> = {
     </form>
   `,
 })
-export class AddSubjectPage {
+export class AddSubjectPage implements OnInit {
+  /** Vem de `?periodo=2026/1` (o período selecionado no painel). */
+  readonly periodo = input<string>();
+
   private readonly svc = inject(SubjectService);
   private readonly router = inject(Router);
 
@@ -152,6 +155,11 @@ export class AddSubjectPage {
     { name: '', value: '', group: 0 },
   ];
   protected errors: string[] = [];
+
+  ngOnInit(): void {
+    const p = this.periodo()?.trim();
+    if (p) this.semester = p;
+  }
 
   protected addRow(): void {
     this.rows.push({ name: '', value: '', group: 0 });
@@ -183,6 +191,7 @@ export class AddSubjectPage {
     this.errors = result.errors;
     if (!result.subject) return;
     this.svc.addSubject(result.subject);
+    this.svc.selectSemester(result.subject.semester); // o painel já abre no período da matéria nova
     void this.router.navigate(['/disciplina', result.subject.id]);
   }
 

@@ -1,4 +1,5 @@
 import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { CURRENT_SEMESTER } from '../config';
 import { DEFAULT_SUBJECTS } from '../data/default-subjects';
 import { Grades } from '../models/evaluation.model';
 import { ResolvedSubject, Subject } from '../models/subject.model';
@@ -7,6 +8,33 @@ import { AppState, StorageService } from './storage.service';
 import { GradeCalculatorService, SubjectSummary } from './grade-calculator.service';
 
 const WEIGHT_TOLERANCE = 0.01;
+const PERIOD_KEY = 'notacerta:period';
+const SEMESTER_RE = /^\d{4}\/[12]$/;
+
+/** "2026/2" → "2026/1" → "2025/2" … */
+export function previousSemesters(semester: string, count: number): string[] {
+  const m = /^(\d{4})\/([12])$/.exec(semester);
+  if (!m) return [];
+  let year = Number(m[1]);
+  let term = Number(m[2]);
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    if (term === 2) term = 1;
+    else {
+      term = 2;
+      year--;
+    }
+    out.push(`${year}/${term}`);
+  }
+  return out;
+}
+
+/** Mais recente primeiro; períodos fora do formato AAAA/N vão para o fim. */
+function compareSemestersDesc(a: string, b: string): number {
+  const ok = (s: string) => SEMESTER_RE.test(s);
+  if (ok(a) && ok(b)) return b.localeCompare(a);
+  return ok(a) ? -1 : ok(b) ? 1 : a.localeCompare(b);
+}
 
 /** Estado do app: disciplinas + notas reais + simulações, com persistência automática. */
 @Injectable({ providedIn: 'root' })
@@ -33,10 +61,23 @@ export class SubjectService {
     });
   }
 
+  readonly currentSemester = CURRENT_SEMESTER;
+  /** Período mostrado no painel (lembrado entre visitas). */
+  readonly selectedSemester = signal(this.loadPeriod());
+
   readonly subjects = computed<ResolvedSubject[]>(() => {
     const s = this.state();
     return [...DEFAULT_SUBJECTS, ...s.customSubjects].map((subject) => this.resolve(subject, s));
   });
+
+  /** Atual + 2 anteriores + qualquer período que tenha matérias. */
+  readonly semesters = computed(() => {
+    const set = new Set<string>([CURRENT_SEMESTER, ...previousSemesters(CURRENT_SEMESTER, 2), this.selectedSemester()]);
+    for (const s of this.subjects()) set.add(s.semester);
+    return [...set].sort(compareSemestersDesc);
+  });
+
+  readonly visibleSubjects = computed(() => this.subjects().filter((s) => s.semester === this.selectedSemester()));
 
   readonly summaries = computed<Record<string, SubjectSummary>>(() => {
     const s = this.state();
@@ -44,6 +85,17 @@ export class SubjectService {
     for (const subject of this.subjects()) out[subject.id] = this.calc.summarize(subject, s.grades[subject.id] ?? {});
     return out;
   });
+
+  selectSemester(semester: string): void {
+    const value = semester.trim();
+    if (!value) return;
+    this.selectedSemester.set(value);
+    try {
+      localStorage.setItem(PERIOD_KEY, value);
+    } catch {
+      /* só vale nesta visita */
+    }
+  }
 
   findSubject(id: string): ResolvedSubject | undefined {
     return this.subjects().find((s) => s.id === id);
@@ -171,6 +223,16 @@ export class SubjectService {
   }
 
   // ── internos ─────────────────────────────────────────────────
+
+  private loadPeriod(): string {
+    try {
+      const saved = localStorage.getItem(PERIOD_KEY);
+      if (saved && SEMESTER_RE.test(saved)) return saved;
+    } catch {
+      /* ignora */
+    }
+    return CURRENT_SEMESTER;
+  }
 
   private update(fn: (s: AppState) => AppState): void {
     const next = fn(this.state());
