@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, signal } f
 import { RouterLink } from '@angular/router';
 import { ResolvedSubject } from '../../models/subject.model';
 import { Grades } from '../../models/evaluation.model';
-import { CanvasAssignment, CanvasCourse, CanvasError, CanvasService, gradeFromAssignments, ImportResult, nameScore, suggestAssignmentIds } from '../../services/canvas.service';
+import { CanvasAssignment, CanvasCourse, CanvasError, CanvasService, effectiveMax, gradeFromAssignments, ImportResult, nameScore, suggestAssignmentIds } from '../../services/canvas.service';
 import { SubjectService } from '../../services/subject.service';
 import { fmt } from '../../utils/number';
 
@@ -57,7 +57,7 @@ import { fmt } from '../../utils/number';
                   @for (a of assignments(); track a.id) {
                     <label class="nc-check nc-check--tight">
                       <input type="checkbox" [checked]="row.selected.includes(a.id)" (change)="toggle(row.id, a.id)" />
-                      <span>{{ a.name }} <span class="nc-muted">· {{ a.graded ? a.score + ' / ' + a.pointsPossible : 'sem nota ainda' }}</span></span>
+                      <span>{{ a.name }} <span class="nc-muted">· {{ a.graded ? fmtValue(a.score ?? 0) + ' / ' + fmtValue(maxOf(a)) : 'sem nota ainda' }}</span></span>
                     </label>
                   }
                 </details>
@@ -101,6 +101,7 @@ export class CanvasImportComponent {
   protected readonly error = signal('');
   protected readonly done = signal('');
   protected fmtValue = fmt;
+  protected maxOf = effectiveMax;
 
   protected readonly rows = computed(() => {
     const assignments = this.assignments();

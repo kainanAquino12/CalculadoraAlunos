@@ -6,11 +6,13 @@ import {
   CanvasAssignment,
   CanvasError,
   CanvasService,
+  effectiveMax,
   gradeFromAssignments,
   nameScore,
   normalizeHost,
   parseNextLink,
   suggestAssignmentIds,
+  weightFromName,
 } from './canvas.service';
 import { SubjectService } from './subject.service';
 
@@ -267,5 +269,94 @@ describe('CanvasImportComponent', () => {
     fixture.componentRef.setInput('grades', {});
     await fixture.whenStable();
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Conectar ao AVA');
+  });
+});
+
+describe('notas lançadas na escala do peso (caso real: Banco de Dados)', () => {
+  // Exatamente como aparece no AVA: nome, "valor da atividade" e nota.
+  const bd = (id: number, name: string, pointsPossible: number | null, score: number | null) => ({
+    id,
+    name,
+    points_possible: pointsPossible,
+    submission: { score, workflow_state: score === null ? 'unsubmitted' : 'graded' },
+  });
+  const screenshot = [
+    bd(1, 'TDE 3 - Avaliativo - Peso 2,0', 2, 1.9),
+    bd(2, 'Prova 1 - Peso 2,0 - 03/09/2026', 10, 1.9), // valor 10 pt, mas a nota 1,90 já está na escala do peso 2,0
+    bd(3, 'Revisão', null, null),
+    bd(4, 'Nota Extra PigData', 1, 1),
+    bd(5, 'SQL da aula 29/09 sobre WHERE', 0, null),
+    bd(6, 'TDE 4', 0, null),
+    bd(7, 'Nota extra Planeta PUC', 0.5, null),
+    bd(8, 'TDE 5 - Peso 2', 2, 0.4),
+    bd(9, 'Atividade Banco de Dados - Dashboards', 0, null),
+    bd(10, 'TDE 6 - Peso 1,0', 1, 1),
+    bd(11, 'TDE 7 - Peso 1,0', 1, 1),
+  ];
+
+  it('weightFromName lê o peso do nome', () => {
+    expect(weightFromName('Prova 1 - Peso 2,0 - 03/09/2026')).toBe(2);
+    expect(weightFromName('TDE 5 - Peso 2')).toBe(2);
+    expect(weightFromName('TDE 6 - peso: 1.5')).toBe(1.5);
+    expect(weightFromName('Revisão')).toBeNull();
+  });
+
+  it('effectiveMax usa o peso do nome quando a nota cabe nele; senão, o valor da atividade', () => {
+    expect(effectiveMax({ name: 'Prova 1 - Peso 2,0', score: 1.9, pointsPossible: 10 })).toBe(2);
+    expect(effectiveMax({ name: 'Prova 1 - Peso 2,0', score: 8.5, pointsPossible: 10 })).toBe(10); // nota passa do peso: está na escala de 10
+    expect(effectiveMax({ name: 'Prova 2', score: 8, pointsPossible: 10 })).toBe(10); // sem peso no nome
+  });
+
+  it('Prova 1 vale 1,90 de 2,00 (antes saía 0,38) e o número do peso não confunde a sugestão', () => {
+    const list = screenshot.map((a) => ({ id: a.id, name: a.name, pointsPossible: a.points_possible, score: a.submission.score, graded: a.submission.score !== null }));
+    expect(suggestAssignmentIds('TDE 3 — Trabalho de Modelagem', list)).toEqual([1]); // não pega "TDE 5 - Peso 3" nem "TDE 4"
+    expect(suggestAssignmentIds('Prova 1 — Modelagem', list)).toEqual([2]);
+    expect(suggestAssignmentIds('TDE 5 — Construção do Banco', list)).toEqual([8]);
+    expect(suggestAssignmentIds('TDE 6 — Planilha de Diagnóstico', list)).toEqual([10]);
+    expect(suggestAssignmentIds('TDE 7 — Relatório de Otimização', list)).toEqual([11]);
+    const prova = list.find((a) => a.id === 2)!;
+    expect(gradeFromAssignments({ scale: 2 }, [prova])).toMatchObject({ grade: 1.9 });
+  });
+
+  it('na tela: importa 1,90 / 1,90 / 0,40 / 1,00 / 1,00 e deixa as listas para o aluno escolher', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [provideRouter([])] });
+    mockBridge((path) => {
+      if (path.includes('/users/self')) return json({ name: 'K' });
+      if (path.includes('/assignments')) return json(screenshot);
+      return json([{ id: 5, name: 'ARQUITETURA DE BANCO DE DADOS - TESF-2U-N-2026/2' }]);
+    });
+    try {
+      await TestBed.inject(CanvasService).connect('pucpr.instructure.com', 't', false);
+      const svc = TestBed.inject(SubjectService);
+      const fixture = TestBed.createComponent(CanvasImportComponent);
+      fixture.componentRef.setInput('subject', svc.findSubject('arq-bd-2026-2'));
+      fixture.componentRef.setInput('grades', svc.gradesOf('arq-bd-2026-2'));
+      await fixture.whenStable();
+      const root = fixture.nativeElement as HTMLElement;
+
+      [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.includes('Buscar no AVA'))!.click();
+      await new Promise((r) => setTimeout(r, 20));
+      await fixture.whenStable();
+
+      // só o cabeçalho da linha (nome da avaliação + nota convertida), sem a lista de atividades do AVA
+      const line = (name: string) => [...root.querySelectorAll('.nc-import-row__head')].find((h) => h.textContent!.includes(name))!.textContent!.replace(/\s+/g, ' ');
+      expect(line('Prova 1')).toContain('1,90 de 2,00');
+      expect(line('TDE 3')).toContain('1,90 de 2,00');
+      expect(line('TDE 5')).toContain('0,40 de 2,00');
+      expect(line('TDE 6')).toContain('1,00 de 1,00');
+      expect(line('TDE 7')).toContain('1,00 de 1,00');
+      expect(line('Listas de Atividades')).not.toContain('de 2,00'); // sem sugestão: o aluno escolhe
+
+      [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.includes('Aplicar 5'))!.click();
+      await fixture.whenStable();
+      const g = svc.gradesOf('arq-bd-2026-2');
+      expect([g['prova1'], g['tde3'], g['tde5'], g['tde6'], g['tde7']]).toEqual([1.9, 1.9, 0.4, 1, 1]);
+      expect(svc.summaries()['arq-bd-2026-2'].accumulated).toBeCloseTo(6.2); // 1,9 + 1,9 + 0,4 + 1 + 1
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

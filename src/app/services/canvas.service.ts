@@ -87,9 +87,41 @@ export function nameScore(a: string, b: string): number {
   return ta.length ? ta.filter((t) => tb.has(t)).length / ta.length : 0;
 }
 
-/** Atividades cujo nome contém todas as palavras da avaliação (sugestão; o aluno confere). */
+/** Identificador da avaliação: o que vem antes do travessão ("TDE 3 — Trabalho de Modelagem" → "tde 3"). */
+function evaluationKey(name: string): string {
+  return normalizeText(name.split(/\s[—–-]\s/)[0]);
+}
+
+/**
+ * A atividade do AVA tem o identificador da avaliação, como sequência de palavras ("TDE 3 - Avaliativo - Peso 2,0" casa
+ * com "TDE 3", mas "TDE 5 - Peso 3" não). Assim o número do peso não confunde, e textos extras no nome não atrapalham.
+ */
+export function matchesEvaluation(evaluationName: string, assignmentName: string): boolean {
+  const key = evaluationKey(evaluationName);
+  return key !== '' && ` ${normalizeText(assignmentName)} `.includes(` ${key} `);
+}
+
+/** Atividades sugeridas para a avaliação (o aluno sempre confere e ajusta). */
 export function suggestAssignmentIds(evaluationName: string, assignments: CanvasAssignment[]): number[] {
-  return assignments.filter((a) => nameScore(evaluationName, a.name) >= 1).map((a) => a.id);
+  return assignments.filter((a) => matchesEvaluation(evaluationName, a.name)).map((a) => a.id);
+}
+
+/** "Prova 1 - Peso 2,0 - 03/09" → 2. Retorna `null` se o nome não traz peso. */
+export function weightFromName(name: string): number | null {
+  const m = /peso\s*[:=]?\s*(\d+(?:[.,]\d+)?)/i.exec(name);
+  const value = m ? Number(m[1].replace(',', '.')) : NaN;
+  return value > 0 ? value : null;
+}
+
+/**
+ * Quanto vale a atividade na escala em que a nota foi lançada. Professores costumam lançar a nota já na escala do peso
+ * (ex.: "Prova 1 - Peso 2,0" com "valor 10 pt" e nota 1,90 = 1,90 de 2,0). Se o nome traz o peso e a nota cabe nele,
+ * usa o peso; se a nota passa do peso, ela claramente está na escala do "valor da atividade".
+ */
+export function effectiveMax(a: Pick<CanvasAssignment, 'name' | 'score' | 'pointsPossible'>): number {
+  const weight = weightFromName(a.name);
+  if (weight !== null && (a.score === null || a.score <= weight + 1e-9)) return weight;
+  return a.pointsPossible ?? 0;
 }
 
 export type ImportResult = { grade: number; detail: string } | { grade: null; reason: string };
@@ -101,7 +133,7 @@ export type ImportResult = { grade: number; detail: string } | { grade: null; re
 export function gradeFromAssignments(ev: Pick<Evaluation, 'scale'>, assignments: CanvasAssignment[]): ImportResult {
   if (assignments.length === 0) return { grade: null, reason: 'Nenhuma atividade escolhida.' };
   if (assignments.some((a) => !a.graded || a.score === null)) return { grade: null, reason: 'O professor ainda não publicou todas as notas.' };
-  const possible = assignments.reduce((s, a) => s + (a.pointsPossible ?? 0), 0);
+  const possible = assignments.reduce((s, a) => s + effectiveMax(a), 0);
   if (!(possible > 0)) return { grade: null, reason: 'A atividade não tem pontuação máxima no AVA.' };
   const score = assignments.reduce((s, a) => s + (a.score ?? 0), 0);
   const grade = roundTo(Math.min(score / possible, 1) * ev.scale, 2);
