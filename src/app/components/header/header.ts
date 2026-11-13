@@ -23,6 +23,7 @@ import { IconComponent } from '../icon/icon';
         @if (auth.entered()) {
           <nav class="nc-nav" aria-label="Navegação principal">
             <a routerLink="/" routerLinkActive="nc-nav__link--on" [routerLinkActiveOptions]="{ exact: true }" class="nc-nav__link"><app-icon name="home" /> Início</a>
+            <a routerLink="/ava" routerLinkActive="nc-nav__link--on" class="nc-nav__link"><app-icon name="download" /> Notas do AVA</a>
             <a routerLink="/" fragment="backup" class="nc-nav__link"><app-icon name="cloud" /> Backup</a>
           </nav>
         }

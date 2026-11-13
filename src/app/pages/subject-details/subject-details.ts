@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { GradeInputComponent } from '../../components/grade-input/grade-input';
+import { CanvasImportComponent } from '../../components/canvas-import/canvas-import';
 import { IconComponent } from '../../components/icon/icon';
 import { ProgressCardComponent } from '../../components/progress-card/progress-card';
 import { SimulationPanelComponent } from '../../components/simulation-panel/simulation-panel';
@@ -20,7 +21,7 @@ interface Section {
 
 @Component({
   selector: 'app-subject-details',
-  imports: [RouterLink, GradeInputComponent, ProgressCardComponent, SimulationPanelComponent, IconComponent],
+  imports: [RouterLink, GradeInputComponent, ProgressCardComponent, SimulationPanelComponent, IconComponent, CanvasImportComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (subject(); as subj) {
@@ -85,6 +86,8 @@ interface Section {
           />
         </div>
       </div>
+
+      <app-canvas-import [subject]="subj" [grades]="grades()" />
 
       <details class="nc-card nc-details-box">
         <summary>Como minha nota é calculada?</summary>

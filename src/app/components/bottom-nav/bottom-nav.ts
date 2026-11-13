@@ -11,6 +11,7 @@ import { IconComponent } from '../icon/icon';
     <nav class="nc-tabbar" aria-label="Navegação">
       <a routerLink="/" routerLinkActive="nc-tab--on" [routerLinkActiveOptions]="{ exact: true }" class="nc-tab"><app-icon name="home" /> Início</a>
       <a routerLink="/adicionar" routerLinkActive="nc-tab--on" class="nc-tab nc-tab--add" aria-label="Adicionar matéria"><app-icon name="plus" /> Adicionar</a>
+      <a routerLink="/ava" routerLinkActive="nc-tab--on" class="nc-tab"><app-icon name="download" /> AVA</a>
       <a routerLink="/" fragment="backup" class="nc-tab"><app-icon name="cloud" /> Backup</a>
     </nav>
   `,

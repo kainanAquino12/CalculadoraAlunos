@@ -65,3 +65,15 @@ A tela de entrada (`/entrar`) oferece **Continuar com o Google** ou **Continuar 
 - Guarda só o perfil na sessão, nunca o token. O app não tem servidor: **nada é enviado a lugar nenhum**.
 - O token do Google é lido no navegador (emissor, Client ID e validade são conferidos), mas a assinatura **não** é verificada. Isso basta para exibir a conta e separar dados locais, **não** serve como segurança de acesso.
 - **Não sincroniza entre aparelhos.** Para isso seria preciso um backend com banco de dados, verificando o token no servidor.
+
+## Notas do AVA (Canvas)
+
+Em **Notas do AVA** (`/ava`) você conecta sua conta do Canvas com um token pessoal e, em cada disciplina, usa **Importar notas do AVA**: escolhe a disciplina do AVA, confere quais atividades valem cada avaliação (o app sugere pelo nome) e aplica.
+
+- **Só lê.** O app consulta suas notas já publicadas e nunca altera nada no AVA.
+- **Não troca o que você já lançou**, a menos que você marque "Substituir".
+- **Só importa nota completa:** se alguma atividade ligada à avaliação ainda não foi corrigida, a avaliação continua pendente. Várias atividades somam pontos (útil para listas).
+- **Conversão:** `pontos obtidos ÷ pontos possíveis × valor da avaliação` (8/10 numa prova que vale 2,0 → 1,60).
+- **O token** fica só neste navegador (na sessão por padrão; no aparelho se você marcar "Lembrar"). Crie um token só para o NotaCerta, com validade curta, e apague-o em *Conta → Configurações → Integrações aprovadas* quando não precisar mais.
+- **Como a chamada é feita:** o navegador tenta falar direto com o AVA. Se bloquear (CORS), a requisição passa pela função [`api/canvas.js`](api/canvas.js) do próprio site, que só repassa um GET, não guarda nem registra o token e só aceita hosts `*.instructure.com`. Se a sua escola usa domínio próprio, liste-o em `CANVAS_ALLOWED_HOSTS` (variável de ambiente na Vercel, separada por vírgula).
+- A função só existe na Vercel. Para testá-la localmente, use `npx vercel dev` em vez de `npm start`.
