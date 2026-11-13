@@ -74,6 +74,17 @@ describe('funções do Canvas', () => {
   });
 });
 
+/** Simula o site: a ponte `/api/canvas?p=...` responde conforme o caminho do Canvas pedido. */
+function mockBridge(routes: (path: string, init: RequestInit) => Response | Promise<Response>) {
+  const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => {
+    const u = String(url);
+    if (!u.startsWith('/api/canvas?p=')) throw new TypeError('Failed to fetch'); // chamada direta: bloqueada por CORS
+    return routes(decodeURIComponent(u.split('?p=')[1]), init);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
 describe('CanvasService', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -83,23 +94,23 @@ describe('CanvasService', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('conecta, e por padrão guarda o token só na sessão (some ao fechar a aba)', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json({ name: 'Kainan' }));
-    vi.stubGlobal('fetch', fetchMock);
+  it('conecta pela ponte do site e, por padrão, guarda o token só na sessão (some ao fechar a aba)', async () => {
+    const fetchMock = mockBridge(() => json({ name: 'Kainan' }));
     const canvas = TestBed.inject(CanvasService);
 
-    expect(await canvas.connect('https://pucpr.instructure.com/', '  segredo  ', false)).toBe('Kainan');
+    expect(await canvas.connect('https://pucpr.instructure.com/profile/settings', '  segredo  ', false)).toBe('Kainan');
     expect(canvas.connected).toBe(true);
+    expect(canvas.connection()?.host).toBe('pucpr.instructure.com'); // aceitou a URL colada inteira
     expect(sessionStorage.getItem('notacerta:canvas')).toContain('segredo');
     expect(localStorage.getItem('notacerta:canvas')).toBeNull();
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://pucpr.instructure.com/api/v1/users/self');
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer segredo' }); // token sem espaços
+    expect(url).toBe('/api/canvas?p=%2Fapi%2Fv1%2Fusers%2Fself');
+    expect((init as RequestInit).headers).toMatchObject({ 'x-canvas-host': 'pucpr.instructure.com', 'x-canvas-token': 'segredo' }); // token sem espaços
   });
 
   it('"lembrar neste aparelho" guarda no localStorage; desconectar apaga tudo', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ name: 'K' })));
+    mockBridge(() => json({ name: 'K' }));
     const canvas = TestBed.inject(CanvasService);
     await canvas.connect('pucpr.instructure.com', 'abc', true);
     expect(localStorage.getItem('notacerta:canvas')).toContain('abc');
@@ -111,18 +122,23 @@ describe('CanvasService', () => {
   });
 
   it('restaura a conexão salva depois de recarregar', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ name: 'K' })));
+    mockBridge(() => json({ name: 'K' }));
     await TestBed.inject(CanvasService).connect('pucpr.instructure.com', 'abc', true);
     TestBed.resetTestingModule();
     expect(TestBed.inject(CanvasService).connection()?.host).toBe('pucpr.instructure.com');
   });
 
   it('token recusado (401) vira mensagem amigável e não deixa conexão salva', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({}, { status: 401 })));
+    mockBridge(() => json({}, { status: 401 }));
     const canvas = TestBed.inject(CanvasService);
     await expect(canvas.connect('pucpr.instructure.com', 'ruim', true)).rejects.toThrowError(/recusou o token/);
     expect(canvas.connected).toBe(false);
     expect(localStorage.getItem('notacerta:canvas')).toBeNull();
+  });
+
+  it('repassa o motivo quando a ponte recusa (ex.: host não permitido)', async () => {
+    mockBridge(() => json({ error: 'Endereço do AVA não permitido.' }, { status: 400 }));
+    await expect(TestBed.inject(CanvasService).connect('escola.edu.br', 't', false)).rejects.toThrowError(/não permitido/);
   });
 
   it('valida endereço e token antes de qualquer chamada', async () => {
@@ -135,61 +151,60 @@ describe('CanvasService', () => {
   });
 
   it('segue a paginação (cabeçalho Link) ao listar disciplinas', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(json({ name: 'K' }))
-      .mockResolvedValueOnce(json([{ id: 1, name: 'Web' }], { headers: { 'Content-Type': 'application/json', Link: '<https://pucpr.instructure.com/api/v1/courses?page=2>; rel="next"' } }))
-      .mockResolvedValueOnce(json([{ id: 2, name: 'Banco' }, { id: 3 }])); // sem nome (acesso restrito): ignorada
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = mockBridge((path) => {
+      if (path.includes('users/self')) return json({ name: 'K' });
+      if (path.includes('page=2')) return json([{ id: 2, name: 'Banco' }, { id: 3 }]); // sem nome (acesso restrito): ignorada
+      return json([{ id: 1, name: 'Web' }], { headers: { 'Content-Type': 'application/json', Link: '<https://pucpr.instructure.com/api/v1/courses?page=2>; rel="next"' } });
+    });
     const canvas = TestBed.inject(CanvasService);
     await canvas.connect('pucpr.instructure.com', 't', false);
     expect(await canvas.courses()).toEqual([
       { id: 1, name: 'Web' },
       { id: 2, name: 'Banco' },
     ]);
-    expect(fetchMock.mock.calls[2][0]).toBe('https://pucpr.instructure.com/api/v1/courses?page=2');
+    expect(decodeURIComponent(String(fetchMock.mock.calls[2][0]))).toContain('/api/v1/courses?page=2');
   });
 
   it('só considera "corrigida" a atividade com nota publicada e não dispensada', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(json({ name: 'K' }))
-        .mockResolvedValueOnce(
-          json([
+    mockBridge((path) =>
+      path.includes('users/self')
+        ? json({ name: 'K' })
+        : json([
             { id: 1, name: 'A', points_possible: 10, submission: { score: 9, workflow_state: 'graded' } },
             { id: 2, name: 'B', points_possible: 10, submission: { score: null, workflow_state: 'submitted' } },
             { id: 3, name: 'C', points_possible: 10, submission: { score: 10, workflow_state: 'graded', excused: true } },
             { id: 4, name: 'D', points_possible: 10 },
           ]),
-        ),
     );
     const canvas = TestBed.inject(CanvasService);
     await canvas.connect('pucpr.instructure.com', 't', false);
     expect((await canvas.assignments(7)).map((a) => a.graded)).toEqual([true, false, false, false]);
   });
 
-  it('se o navegador bloquear a chamada direta (CORS), usa a função /api/canvas do site', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(json({ name: 'K' })) // conectar (direto)
-      .mockRejectedValueOnce(new TypeError('Failed to fetch')) // cursos: bloqueado
-      .mockResolvedValueOnce(json([{ id: 1, name: 'Web' }])); // cursos via proxy
+  it('sem a ponte (o site devolve a página HTML do app), tenta direto e explica o bloqueio do navegador', async () => {
+    // Era o que acontecia no `npm start` antigo: /api/canvas caía na página do app e a chamada direta é barrada por CORS.
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith('/api/canvas')) return new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+      throw new TypeError('Failed to fetch');
+    });
     vi.stubGlobal('fetch', fetchMock);
-    const canvas = TestBed.inject(CanvasService);
-    await canvas.connect('pucpr.instructure.com', 'tok', false);
-    expect(await canvas.courses()).toEqual([{ id: 1, name: 'Web' }]);
-
-    const [url, init] = fetchMock.mock.calls[2];
-    expect(url).toContain('/api/canvas?p=');
-    expect(decodeURIComponent(String(url).split('?p=')[1])).toContain('/api/v1/courses');
-    expect((init as RequestInit).headers).toMatchObject({ 'x-canvas-host': 'pucpr.instructure.com', 'x-canvas-token': 'tok' });
+    await expect(TestBed.inject(CanvasService).connect('pucpr.instructure.com', 't', false)).rejects.toThrowError(/bloqueia consultas diretas.*ponte/);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // ponte, depois direto
   });
 
-  it('sem rede nem proxy: mensagem amigável', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-    await expect(TestBed.inject(CanvasService).connect('pucpr.instructure.com', 't', false)).rejects.toThrowError(/Não foi possível falar com o AVA/);
+  it('se a ponte não existir mas o AVA aceitar chamada direta (CORS liberado), funciona direto', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith('/api/canvas')) return new Response('nope', { status: 404, headers: { 'Content-Type': 'text/html' } });
+      return json({ name: 'Direto' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await TestBed.inject(CanvasService).connect('pucpr.instructure.com', 'tok', false)).toBe('Direto');
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://pucpr.instructure.com/api/v1/users/self');
+  });
+
+  it('resposta que não é JSON vira mensagem amigável (nunca "erro genérico")', async () => {
+    mockBridge(() => new Response('<html>manutenção</html>', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await expect(TestBed.inject(CanvasService).connect('pucpr.instructure.com', 't', false)).rejects.toThrowError(/resposta inesperada/);
   });
 });
 
@@ -203,18 +218,15 @@ describe('CanvasImportComponent', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   function mockCanvas() {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (url.includes('/users/self')) return json({ name: 'K' });
-        if (url.includes('/assignments'))
-          return json([
-            { id: 10, name: 'Prova 1', points_possible: 10, submission: { score: 8, workflow_state: 'graded' } },
-            { id: 11, name: 'TDE 1 - Site estático', points_possible: 10, submission: { score: null, workflow_state: 'unsubmitted' } },
-          ]);
-        return json([{ id: 1, name: 'DESENVOLVIMENTO WEB - 2026/2' }, { id: 2, name: 'Outra matéria' }]);
-      }),
-    );
+    mockBridge((path) => {
+      if (path.includes('/users/self')) return json({ name: 'K' });
+      if (path.includes('/assignments'))
+        return json([
+          { id: 10, name: 'Prova 1', points_possible: 10, submission: { score: 8, workflow_state: 'graded' } },
+          { id: 11, name: 'TDE 1 - Site estático', points_possible: 10, submission: { score: null, workflow_state: 'unsubmitted' } },
+        ]);
+      return json([{ id: 1, name: 'DESENVOLVIMENTO WEB - 2026/2' }, { id: 2, name: 'Outra matéria' }]);
+    });
   }
 
   it('sugere o curso e as atividades pelo nome, mostra a nota convertida e aplica só onde está vazio', async () => {

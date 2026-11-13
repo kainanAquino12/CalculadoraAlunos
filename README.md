@@ -8,7 +8,7 @@ Aplicação web (Angular 22 + TypeScript + Bootstrap 5) para acompanhar notas e 
 
 ```bash
 npm install
-npm start          # http://localhost:4200
+npm start          # http://localhost:4200 (sobe também a ponte do AVA)
 npm test           # testes unitários e de interface (Vitest)
 npm run build      # saída em dist/notacerta/browser
 ```
@@ -75,5 +75,6 @@ Em **Notas do AVA** (`/ava`) você conecta sua conta do Canvas com um token pess
 - **Só importa nota completa:** se alguma atividade ligada à avaliação ainda não foi corrigida, a avaliação continua pendente. Várias atividades somam pontos (útil para listas).
 - **Conversão:** `pontos obtidos ÷ pontos possíveis × valor da avaliação` (8/10 numa prova que vale 2,0 → 1,60).
 - **O token** fica só neste navegador (na sessão por padrão; no aparelho se você marcar "Lembrar"). Crie um token só para o NotaCerta, com validade curta, e apague-o em *Conta → Configurações → Integrações aprovadas* quando não precisar mais.
-- **Como a chamada é feita:** o navegador tenta falar direto com o AVA. Se bloquear (CORS), a requisição passa pela função [`api/canvas.js`](api/canvas.js) do próprio site, que só repassa um GET, não guarda nem registra o token e só aceita hosts `*.instructure.com`. Se a sua escola usa domínio próprio, liste-o em `CANVAS_ALLOWED_HOSTS` (variável de ambiente na Vercel, separada por vírgula).
-- A função só existe na Vercel. Para testá-la localmente, use `npx vercel dev` em vez de `npm start`.
+- **Como a chamada é feita:** o AVA da PUCPR **não aceita chamadas diretas do navegador** (não envia cabeçalhos CORS), então toda consulta passa pela ponte [`api/canvas.js`](api/canvas.js) do próprio site, que só repassa um GET, não guarda nem registra o token e só aceita hosts `*.instructure.com`. Se a sua escola usa domínio próprio, liste-o em `CANVAS_ALLOWED_HOSTS` (variável de ambiente na Vercel, separada por vírgula).
+- **Localmente:** `npm start` sobe a ponte (`scripts/dev-api.cjs`, porta 3001) junto com o Angular, e o `proxy.conf.json` encaminha `/api` para ela. Para rodar só o Angular, use `npm run start:ng` (aí a importação do AVA não funciona).
+- **Endereço:** pode colar a URL inteira (ex.: `https://pucpr.instructure.com/profile/settings`); o app guarda só o host.

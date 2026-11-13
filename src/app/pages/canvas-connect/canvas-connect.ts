@@ -70,7 +70,7 @@ import { CanvasError, CanvasService } from '../../services/canvas.service';
     }
 
     <p class="nc-muted nc-small nc-ava__foot">
-      O token fica só neste navegador. As consultas vão direto ao AVA; se o navegador bloquear, passam pelo próprio site apenas para repassar a requisição, sem guardar nada. O app só <em>lê</em> suas notas publicadas; nunca altera nada no AVA.
+      O token fica só neste navegador. As consultas passam pelo próprio site apenas para repassar a requisição ao AVA (ele não aceita chamadas diretas do navegador), sem guardar nada. O app só <em>lê</em> suas notas publicadas; nunca altera nada no AVA.
     </p>
   `,
 })
@@ -90,7 +90,7 @@ export class CanvasConnectPage {
       await this.canvas.connect(this.host, this.token, this.remember);
       this.token = ''; // some do campo assim que é guardado
     } catch (e) {
-      this.error.set(e instanceof CanvasError ? e.message : 'Não foi possível conectar.');
+      this.error.set(e instanceof CanvasError ? e.message : `Não foi possível conectar (${e instanceof Error ? e.message : 'erro desconhecido'}).`);
     } finally {
       this.busy.set(false);
     }

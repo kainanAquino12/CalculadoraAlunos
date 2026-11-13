@@ -112,8 +112,8 @@ export function gradeFromAssignments(ev: Pick<Evaluation, 'scale'>, assignments:
 
 /**
  * Conexão com o Canvas (AVA) usando o token pessoal do aluno. O token fica só neste navegador: na sessão (padrão)
- * ou no aparelho, se o aluno pedir para lembrar. As chamadas vão direto ao AVA; se o navegador bloquear (CORS),
- * passam pela função `/api/canvas` do próprio site, que só repassa a requisição e não guarda nada.
+ * ou no aparelho, se o aluno pedir para lembrar. As consultas passam pela função `/api/canvas` do próprio site,
+ * que só repassa a requisição ao AVA e não guarda nada (o AVA não aceita chamadas diretas do navegador).
  */
 @Injectable({ providedIn: 'root' })
 export class CanvasService {
@@ -134,7 +134,7 @@ export class CanvasService {
     const previous = this.connection();
     this.connection.set({ host, token: clean });
     try {
-      const me = (await (await this.request('/api/v1/users/self')).json()) as { name?: string };
+      const me = (await this.readJson(await this.request('/api/v1/users/self'))) as { name?: string };
       const conn: Connection = { host, token: clean, userName: me.name };
       this.connection.set(conn);
       this.persist(conn, remember);
@@ -212,30 +212,58 @@ export class CanvasService {
     let path: string | null = firstPath;
     for (let page = 0; path && page < MAX_PAGES; page++) {
       const res = await this.request(path);
-      out.push(...((await res.json()) as T[]));
+      out.push(...((await this.readJson(res)) as T[]));
       path = parseNextLink(res.headers.get('Link'));
     }
     return out;
   }
 
+  private async readJson(res: Response): Promise<unknown> {
+    try {
+      return await res.json();
+    } catch {
+      throw new CanvasError('O AVA enviou uma resposta inesperada. Confira o endereço do AVA.');
+    }
+  }
+
+  /**
+   * O AVA não libera consultas diretas do navegador (não envia cabeçalhos CORS), então a ponte `/api/canvas`
+   * do próprio site é o caminho principal. A chamada direta só é tentada se a ponte não existir (ex.: AVA que libera CORS).
+   */
   private async request(path: string): Promise<Response> {
     const conn = this.connection();
     if (!conn) throw new CanvasError('Conecte ao AVA primeiro.');
-    let res: Response;
-    try {
-      res = await fetch(`https://${conn.host}${path}`, { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/json' } });
-    } catch {
-      // Bloqueio do navegador (CORS) ou rede: tenta pela função do próprio site.
-      try {
-        res = await fetch(`/api/canvas?p=${encodeURIComponent(path)}`, { headers: { 'x-canvas-host': conn.host, 'x-canvas-token': conn.token } });
-      } catch {
-        throw new CanvasError('Não foi possível falar com o AVA. Verifique a conexão e o endereço.');
-      }
-    }
+
+    const res = (await this.viaBridge(conn, path)) ?? (await this.direct(conn, path));
+
     if (res.status === 401) throw new CanvasError('O AVA recusou o token (inválido, expirado ou removido). Gere um novo.');
-    if (res.status === 404 && path.startsWith('/api/v1/users/self')) throw new CanvasError('Endereço do AVA não encontrado. Confira o endereço.');
-    if (!res.ok) throw new CanvasError(`O AVA respondeu com erro ${res.status}.`);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      if (typeof body?.error === 'string') throw new CanvasError(body.error);
+      if (res.status === 404 && path.startsWith('/api/v1/users/self')) throw new CanvasError('Endereço do AVA não encontrado. Confira o endereço.');
+      throw new CanvasError(`O AVA respondeu com erro ${res.status}.`);
+    }
     return res;
+  }
+
+  /** `null` se a ponte não existe neste ambiente (rede caiu ou a resposta não é JSON, como a página do app). */
+  private async viaBridge(conn: Connection, path: string): Promise<Response | null> {
+    try {
+      const res = await fetch(`/api/canvas?p=${encodeURIComponent(path)}`, { headers: { 'x-canvas-host': conn.host, 'x-canvas-token': conn.token } });
+      return (res.headers.get('content-type') ?? '').includes('json') ? res : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async direct(conn: Connection, path: string): Promise<Response> {
+    try {
+      return await fetch(`https://${conn.host}${path}`, { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/json' } });
+    } catch {
+      throw new CanvasError(
+        'Não foi possível falar com o AVA. O AVA bloqueia consultas diretas do navegador e a ponte do site não está ativa aqui: use o site publicado na Vercel ou rode "npm start".',
+      );
+    }
   }
 
   private persist(conn: Connection, remember: boolean): void {
