@@ -1,6 +1,6 @@
 import { inject, Injectable, signal } from '@angular/core';
-import { Evaluation } from '../models/evaluation.model';
-import { roundTo } from '../utils/number';
+import { Evaluation, ImportMode } from '../models/evaluation.model';
+import { fmt, roundTo } from '../utils/number';
 import { AuthService } from './auth.service';
 
 export interface CanvasCourse {
@@ -27,6 +27,8 @@ interface Connection {
 export interface CanvasLink {
   courseId: number;
   evaluations: Record<string, number[]>;
+  /** Escolha do aluno de como somar cada avaliação (quando diferente do padrão dela). */
+  modes?: Record<string, ImportMode>;
 }
 
 export class CanvasError extends Error {}
@@ -96,14 +98,16 @@ function evaluationKey(name: string): string {
  * A atividade do AVA tem o identificador da avaliação, como sequência de palavras ("TDE 3 - Avaliativo - Peso 2,0" casa
  * com "TDE 3", mas "TDE 5 - Peso 3" não). Assim o número do peso não confunde, e textos extras no nome não atrapalham.
  */
-export function matchesEvaluation(evaluationName: string, assignmentName: string): boolean {
-  const key = evaluationKey(evaluationName);
-  return key !== '' && ` ${normalizeText(assignmentName)} `.includes(` ${key} `);
+export function matchesEvaluation(evaluationName: string, assignmentName: string, aliases: string[] = []): boolean {
+  const haystack = ` ${normalizeText(assignmentName)} `;
+  // Com apelidos explícitos ("1 Avaliação Somativa"), só eles valem: o nome genérico ("TDE") casaria com tudo.
+  const keys = aliases.length ? aliases.map(normalizeText) : [evaluationKey(evaluationName)];
+  return keys.some((key) => key !== '' && haystack.includes(` ${key} `));
 }
 
 /** Atividades sugeridas para a avaliação (o aluno sempre confere e ajusta). */
-export function suggestAssignmentIds(evaluationName: string, assignments: CanvasAssignment[]): number[] {
-  return assignments.filter((a) => matchesEvaluation(evaluationName, a.name)).map((a) => a.id);
+export function suggestAssignmentIds(evaluationName: string, assignments: CanvasAssignment[], aliases: string[] = []): number[] {
+  return assignments.filter((a) => matchesEvaluation(evaluationName, a.name, aliases)).map((a) => a.id);
 }
 
 /** "Prova 1 - Peso 2,0 - 03/09" → 2. Retorna `null` se o nome não traz peso. */
@@ -127,12 +131,23 @@ export function effectiveMax(a: Pick<CanvasAssignment, 'name' | 'score' | 'point
 export type ImportResult = { grade: number; detail: string } | { grade: null; reason: string };
 
 /**
- * Converte atividades do AVA na nota da avaliação (na escala dela). Várias atividades somam pontos.
- * Só devolve nota se TODAS já foram corrigidas, para não registrar uma nota parcial como se fosse final.
+ * Converte atividades do AVA na nota da avaliação (na escala dela).
+ *  - `proportion` (padrão): pontos obtidos ÷ pontos possíveis × valor da avaliação (várias atividades somam os dois lados).
+ *  - `sum`: a professora compõe a nota somando pontos de várias atividades (ex.: TDE de 3,0 = revisão 1,5 + exercício 3…);
+ *    soma os pontos obtidos e limita ao valor da avaliação.
+ * Só devolve nota se TODAS as atividades escolhidas já foram corrigidas, para não registrar uma nota parcial como se
+ * fosse final (quem quer o parcial desmarca as que ainda não saíram).
  */
-export function gradeFromAssignments(ev: Pick<Evaluation, 'scale'>, assignments: CanvasAssignment[]): ImportResult {
+export function gradeFromAssignments(ev: Pick<Evaluation, 'scale'>, assignments: CanvasAssignment[], mode: ImportMode = 'proportion'): ImportResult {
   if (assignments.length === 0) return { grade: null, reason: 'Nenhuma atividade escolhida.' };
-  if (assignments.some((a) => !a.graded || a.score === null)) return { grade: null, reason: 'O professor ainda não publicou todas as notas.' };
+  if (assignments.some((a) => !a.graded || a.score === null)) {
+    return { grade: null, reason: 'O professor ainda não publicou todas as notas. Desmarque as atividades sem nota para importar só o que já saiu.' };
+  }
+  if (mode === 'sum') {
+    const total = assignments.reduce((s, a) => s + (a.score ?? 0), 0);
+    const grade = roundTo(Math.min(total, ev.scale), 2);
+    return { grade, detail: total > ev.scale ? `soma de ${fmt(total)} pontos, limitada a ${fmt(ev.scale)}` : `soma de ${fmt(total)} pontos` };
+  }
   const possible = assignments.reduce((s, a) => s + effectiveMax(a), 0);
   if (!(possible > 0)) return { grade: null, reason: 'A atividade não tem pontuação máxima no AVA.' };
   const score = assignments.reduce((s, a) => s + (a.score ?? 0), 0);

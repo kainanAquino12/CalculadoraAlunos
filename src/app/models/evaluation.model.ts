@@ -19,7 +19,19 @@ export interface Evaluation {
   weight?: number;
   /** Precisão da nota exigida nas sugestões (padrão 0,01). */
   step?: number;
+  /**
+   * Como ela aparece no AVA, quando o nome do NotaCerta não bastaria para achar (ex.: "1 Avaliação Somativa").
+   * Cada frase é procurada como sequência de palavras no nome da atividade.
+   */
+  aliases?: string[];
+  /**
+   * Como as atividades do AVA viram a nota. Padrão: proporção (pontos obtidos ÷ pontos possíveis × valor da avaliação).
+   * `sum`: a professora compõe a nota somando pontos de várias atividades; soma os pontos e limita ao valor da avaliação.
+   */
+  importMode?: ImportMode;
 }
+
+export type ImportMode = 'proportion' | 'sum';
 
 /** Notas lançadas por avaliação. `null`/ausente = pendente (diferente de zero). */
 export type Grades = Readonly<Record<string, number | null | undefined>>;

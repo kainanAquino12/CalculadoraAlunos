@@ -360,3 +360,102 @@ describe('notas lançadas na escala do peso (caso real: Banco de Dados)', () => 
     }
   });
 });
+
+describe('Engenharia de Requisitos: TDE composto pela soma de atividades (caso real)', () => {
+  const a = (id: number, name: string, pointsPossible: number | null, score: number | null) => ({
+    id,
+    name,
+    points_possible: pointsPossible,
+    submission: { score, workflow_state: score === null ? 'unsubmitted' : 'graded' },
+  });
+  // Como aparece no AVA (colunas do print).
+  const ava = [
+    a(1, '1 Avaliação Somativa (7,0)', 7, 5),
+    a(2, '1 - TDE (3,0)', 3, 2.1),
+    a(3, '2 - TDE (3,0 pts)', 3, null),
+    a(4, 'Atividade de revisão (1,5 de 3,0 pts)', 1.5, 1.5),
+    a(5, 'TDE - Atividade Extra 19/10', 1, 1),
+    a(6, 'Exercício 09 da 1ª lista - Dashboards', 3.5, 3),
+    a(7, 'Atividade avaliativa (2,0 de 3,0 pts)', 2, null),
+  ];
+  const list = ava.map((x) => ({ id: x.id, name: x.name, pointsPossible: x.points_possible, score: x.submission.score, graded: x.submission.score !== null }));
+  const sub = () => TestBed.inject(SubjectService).findSubject('requisitos-2026-2')!;
+  const ev = (id: string) => sub().evaluations.find((e) => e.id === id)!;
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [provideRouter([])] });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('acha cada coluna pela numeração do AVA (o nome genérico "TDE" não casa com tudo)', () => {
+    const ids = (id: string) => suggestAssignmentIds(ev(id).name, list, ev(id).aliases);
+    expect(ids('av12')).toEqual([1]);
+    expect(ids('tde12')).toEqual([2]); // só "1 - TDE", não "2 - TDE" nem "TDE - Atividade Extra"
+    expect(ids('tde3')).toEqual([3]); // a coluna "2 - TDE"
+    expect(ids('av3')).toEqual([]); // ainda não existe no AVA
+  });
+
+  it('proporção (padrão geral) e soma de pontos dão resultados diferentes: aqui vale a soma', () => {
+    const parts = [list[3], list[4], list[5]]; // revisão 1,5 + extra 1 + exercício 3
+    expect(gradeFromAssignments({ scale: 3 }, parts, 'sum')).toMatchObject({ grade: 3 }); // 5,5 limitado a 3,0
+    expect(gradeFromAssignments({ scale: 3 }, parts, 'proportion')).toMatchObject({ grade: 2.75 }); // 5,5 ÷ 6 × 3 — não é como ela soma
+    expect(gradeFromAssignments({ scale: 3 }, [list[3], list[4]], 'sum')).toMatchObject({ grade: 2.5 }); // abaixo do limite: soma direta
+  });
+
+  it('sem nota em alguma atividade escolhida, explica como importar só o que já saiu', () => {
+    const r = gradeFromAssignments({ scale: 3 }, [list[3], list[6]], 'sum');
+    expect(r.grade).toBeNull();
+    expect('reason' in r && r.reason).toContain('Desmarque as atividades sem nota');
+  });
+
+  it('o padrão dos TDEs desta disciplina é somar; das avaliações somativas é proporção', () => {
+    expect(ev('tde12').importMode).toBe('sum');
+    expect(ev('tde3').importMode).toBe('sum');
+    expect(ev('av12').importMode).toBeUndefined();
+  });
+
+  it('na tela: 5 de 7 e 2,1 de 3 entram sozinhos; o TDE 2 vira soma das atividades marcadas (limitada a 3,0)', async () => {
+    mockBridge((path) => {
+      if (path.includes('/users/self')) return json({ name: 'K' });
+      if (path.includes('/assignments')) return json(ava);
+      return json([{ id: 9, name: 'REQUISITOS DE SOFTWARE - TESF-2U-N-2026/2' }]);
+    });
+    await TestBed.inject(CanvasService).connect('pucpr.instructure.com', 't', false);
+    const svc = TestBed.inject(SubjectService);
+    const fixture = TestBed.createComponent(CanvasImportComponent);
+    fixture.componentRef.setInput('subject', svc.findSubject('requisitos-2026-2'));
+    fixture.componentRef.setInput('grades', svc.gradesOf('requisitos-2026-2'));
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+
+    [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.includes('Buscar no AVA'))!.click();
+    await new Promise((r) => setTimeout(r, 20));
+    await fixture.whenStable();
+
+    const rows = () => [...root.querySelectorAll('.nc-import-row')];
+    const head = (name: string) => [...root.querySelectorAll('.nc-import-row__head')].find((h) => h.textContent!.includes(name))!.textContent!.replace(/\s+/g, ' ');
+    expect(head('Avaliação Somativa 1')).toContain('5,00 de 7,00');
+    expect(head('TDE 1')).toContain('2,10 de 3,00');
+    expect(head('TDE 2')).not.toContain('de 3,00'); // a coluna "2 - TDE" ainda está sem nota
+
+    // marca as atividades pequenas no TDE 2 (revisão, extra e exercício) e desmarca a coluna sem nota
+    const tde2 = rows().find((r) => r.querySelector('.nc-import-row__head')!.textContent!.includes('TDE 2'))!;
+    const boxes = [...tde2.querySelectorAll<HTMLInputElement>('input[type=checkbox]')];
+    const box = (text: string) => boxes.find((b) => b.parentElement!.textContent!.includes(text))!;
+    for (const t of ['2 - TDE (3,0 pts)', 'Atividade de revisão', 'TDE - Atividade Extra', 'Exercício 09']) {
+      box(t).click();
+      await fixture.whenStable();
+    }
+    expect(head('TDE 2')).toContain('3,00 de 3,00'); // 1,5 + 1 + 3 = 5,5, limitado a 3,0
+    expect(tde2.textContent).toContain('soma de 5,50 pontos, limitada a 3,00');
+
+    [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.includes('Aplicar 3'))!.click();
+    await fixture.whenStable();
+    const g = svc.gradesOf('requisitos-2026-2');
+    expect([g['av12'], g['tde12'], g['tde3']]).toEqual([5, 2.1, 3]);
+    expect(svc.summaries()['requisitos-2026-2'].groups[0].grade).toBeCloseTo(7.1); // 5 + 2,1: nota do grupo RA1/RA2
+  });
+});

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ResolvedSubject } from '../../models/subject.model';
-import { Grades } from '../../models/evaluation.model';
+import { Evaluation, Grades, ImportMode } from '../../models/evaluation.model';
 import { CanvasAssignment, CanvasCourse, CanvasError, CanvasService, effectiveMax, gradeFromAssignments, ImportResult, nameScore, suggestAssignmentIds } from '../../services/canvas.service';
 import { SubjectService } from '../../services/subject.service';
 import { fmt } from '../../utils/number';
@@ -61,8 +61,16 @@ import { fmt } from '../../utils/number';
                     </label>
                   }
                 </details>
+                @if (row.selected.length > 1) {
+                  <label class="nc-check nc-check--tight">
+                    <input type="checkbox" [checked]="row.mode === 'sum'" (change)="toggleMode(row.id)" />
+                    <span>Somar os pontos das atividades <span class="nc-muted">(a professora compõe a nota somando; limita a {{ fmtValue(row.scale) }})</span></span>
+                  </label>
+                }
                 @if (row.result.grade === null && row.selected.length) {
                   <p class="nc-small nc-muted nc-import-row__why">{{ row.result.reason }}</p>
+                } @else if (row.result.grade !== null && row.mode === 'sum' && row.selected.length > 1) {
+                  <p class="nc-small nc-muted nc-import-row__why">{{ row.result.detail }}</p>
                 } @else if (row.result.grade !== null && row.hasGrade) {
                   <p class="nc-small nc-muted nc-import-row__why">Você já lançou {{ fmtValue(row.current ?? 0) }} aqui.</p>
                 }
@@ -96,6 +104,8 @@ export class CanvasImportComponent {
   protected readonly courseId = signal<number | null>(null);
   protected readonly assignments = signal<CanvasAssignment[]>([]);
   protected readonly selection = signal<Record<string, number[]>>({});
+  /** Escolhas do aluno de "proporção" ou "somar pontos"; sem escolha vale o padrão da avaliação. */
+  protected readonly modes = signal<Record<string, ImportMode>>({});
   protected readonly overwrite = signal(false);
   protected readonly busy = signal(false);
   protected readonly error = signal('');
@@ -110,8 +120,9 @@ export class CanvasImportComponent {
       const selected = this.selection()[ev.id] ?? [];
       const picked = assignments.filter((a) => selected.includes(a.id));
       const current = typeof grades[ev.id] === 'number' ? (grades[ev.id] as number) : null;
-      const result: ImportResult = gradeFromAssignments(ev, picked);
-      return { id: ev.id, name: ev.name, scale: ev.scale, selected, result, current, hasGrade: current !== null };
+      const mode = this.modeOf(ev);
+      const result: ImportResult = gradeFromAssignments(ev, picked, mode);
+      return { id: ev.id, name: ev.name, scale: ev.scale, selected, result, current, hasGrade: current !== null, mode };
     });
   });
 
@@ -152,6 +163,13 @@ export class CanvasImportComponent {
     }
   }
 
+  protected toggleMode(evaluationId: string): void {
+    const ev = this.subject().evaluations.find((e) => e.id === evaluationId);
+    if (!ev) return;
+    this.modes.update((m) => ({ ...m, [evaluationId]: this.modeOf(ev) === 'sum' ? 'proportion' : 'sum' }));
+    this.done.set('');
+  }
+
   protected toggle(evaluationId: string, assignmentId: number): void {
     this.selection.update((s) => {
       const current = s[evaluationId] ?? [];
@@ -168,8 +186,12 @@ export class CanvasImportComponent {
       count++;
     }
     const courseId = this.courseId();
-    if (courseId !== null) this.canvas.saveLink(this.subject().id, { courseId, evaluations: this.selection() });
+    if (courseId !== null) this.canvas.saveLink(this.subject().id, { courseId, evaluations: this.selection(), modes: this.modes() });
     this.done.set(count ? `${count} ${count === 1 ? 'nota importada' : 'notas importadas'}.` : 'Nada novo para importar.');
+  }
+
+  private modeOf(ev: Evaluation): ImportMode {
+    return this.modes()[ev.id] ?? ev.importMode ?? 'proportion';
   }
 
   private async openCourse(id: number): Promise<void> {
@@ -179,8 +201,9 @@ export class CanvasImportComponent {
     const saved = this.canvas.loadLink(this.subject().id);
     const selection: Record<string, number[]> = {};
     for (const ev of this.subject().evaluations) {
-      selection[ev.id] = saved?.courseId === id && saved.evaluations[ev.id] ? saved.evaluations[ev.id].filter((aid) => assignments.some((a) => a.id === aid)) : suggestAssignmentIds(ev.name, assignments);
+      selection[ev.id] = saved?.courseId === id && saved.evaluations[ev.id] ? saved.evaluations[ev.id].filter((aid) => assignments.some((a) => a.id === aid)) : suggestAssignmentIds(ev.name, assignments, ev.aliases);
     }
     this.selection.set(selection);
+    this.modes.set(saved?.courseId === id ? (saved.modes ?? {}) : {});
   }
 }

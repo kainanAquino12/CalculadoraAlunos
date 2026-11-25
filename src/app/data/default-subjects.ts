@@ -116,10 +116,11 @@ export const DEFAULT_SUBJECTS: Subject[] = [
       { id: 'ra3', name: 'RA3', share: 0.5 },
     ],
     evaluations: [
-      { id: 'av12', name: 'Avaliação somativa — RA1 e RA2', group: 'ra12', scale: 7, maxPoints: 3.5, description: 'Vale até 7,0 no grupo.' },
-      { id: 'tde12', name: 'TDE — RA1 e RA2', group: 'ra12', scale: 3, maxPoints: 1.5, description: 'Vale até 3,0 no grupo.' },
-      { id: 'av3', name: 'Avaliação somativa — RA3', group: 'ra3', scale: 7, maxPoints: 3.5, description: 'Vale até 7,0 no grupo.' },
-      { id: 'tde3', name: 'TDE — RA3', group: 'ra3', scale: 3, maxPoints: 1.5, description: 'Vale até 3,0 no grupo.' },
+      // Os nomes seguem a numeração do AVA ("1 Avaliação Somativa (7,0)", "1 - TDE (3,0)", "2 - TDE (3,0 pts)") para a importação achar certo.
+      { id: 'av12', name: 'Avaliação Somativa 1 — RA1 e RA2', group: 'ra12', scale: 7, maxPoints: 3.5, aliases: ['1 Avaliação Somativa'], description: 'Vale até 7,0 no grupo.' },
+      { id: 'tde12', name: 'TDE 1 — RA1 e RA2', group: 'ra12', scale: 3, maxPoints: 1.5, aliases: ['1 TDE'], importMode: 'sum', description: 'Vale até 3,0 no grupo. A professora compõe o TDE somando atividades.' },
+      { id: 'av3', name: 'Avaliação Somativa 2 — RA3', group: 'ra3', scale: 7, maxPoints: 3.5, aliases: ['2 Avaliação Somativa'], description: 'Vale até 7,0 no grupo.' },
+      { id: 'tde3', name: 'TDE 2 — RA3', group: 'ra3', scale: 3, maxPoints: 1.5, aliases: ['2 TDE'], importMode: 'sum', description: 'Vale até 3,0 no grupo. A professora compõe o TDE somando atividades (revisão, exercícios, extras).' },
     ],
     formula: {
       validation: 'pending',
@@ -128,8 +129,9 @@ export const DEFAULT_SUBJECTS: Subject[] = [
       explanation:
         'A disciplina tem dois grupos de resultados de aprendizagem. Em cada um você soma a avaliação (até 7) e o TDE (até 3), obtendo uma nota de 0 a 10. A nota final é a média dos dois grupos.',
       notes: [
-        'O quadro do plano mostra os dois grupos com Avaliação (peso 7,0) + TDE (peso 3,0), mas o cronograma fala em duas avaliações de 5,0 pontos (15/09 e 10/11) e em dois momentos de TDE (17/08 e 05/10).',
-        'O plano não deixa claro se a mesma avaliação alimenta os dois grupos. O app assume uma avaliação e um TDE por grupo.',
+        'O quadro do plano mostra os dois grupos com Avaliação (peso 7,0) + TDE (peso 3,0). O AVA confirma essa estrutura: "1 Avaliação Somativa (7,0)", "1 - TDE (3,0)" e "2 - TDE (3,0 pts)". O cronograma fala em avaliações de 5,0, o que parece desatualizado.',
+        'O app assume 1 = RA1 e RA2 e 2 = RA3 (a numeração do AVA segue a ordem do quadro do plano). Se a numeração for outra, é só trocar as atividades na importação.',
+        'Cada TDE é composto pela professora somando atividades menores (revisão, exercícios, extras). Na importação use "Somar os pontos das atividades": os pontos são somados e limitados a 3,0.',
         'O plano não define a meta de aprovação; 7,0 é o padrão do app e pode ser alterado.',
         RECUPERACAO_NOTA,
       ],
